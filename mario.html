@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="mn">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Марио 🍄 — Платформ тоглоом</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    min-height: 100vh;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    font-family: 'Arial', sans-serif;
+    overflow: hidden;
+  }
+
+  .container {
+    position: relative;
+    width: 800px;
+    height: 600px;
+    background: linear-gradient(180deg, #87CEEB 0%, #87CEEB 60%, #90EE90 60%, #90EE90 100%);
+    border: 3px solid #333;
+    box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+    overflow: hidden;
+    cursor: none;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    image-rendering: pixelated;
+  }
+
+  .ui {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    color: #333;
+    font-weight: bold;
+    font-size: 14px;
+    z-index: 10;
+  }
+
+  .ui div {
+    margin: 5px 0;
+  }
+
+  .controls {
+    position: absolute;
+    bottom: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    color: #333;
+    font-size: 12px;
+    text-align: center;
+    background: rgba(255,255,255,0.7);
+    padding: 8px 15px;
+    border-radius: 5px;
+    z-index: 10;
+  }
+
+  .game-over {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 30px;
+    border-radius: 10px;
+    text-align: center;
+    z-index: 100;
+    display: none;
+    min-width: 250px;
+  }
+
+  .game-over h1 {
+    font-size: 40px;
+    margin-bottom: 10px;
+  }
+
+  .game-over p {
+    font-size: 18px;
+    margin: 10px 0;
+  }
+
+  .game-over button {
+    margin-top: 15px;
+    padding: 10px 20px;
+    font-size: 16px;
+    background: #4CAF50;
+    color: white;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+  }
+
+  .game-over button:hover {
+    background: #45a049;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <canvas id="gameCanvas" width="800" height="600"></canvas>
+  
+  <div class="ui">
+    <div>❤️ Амьд: <span id="lives">3</span></div>
+    <div>⭐ Оноо: <span id="score">0</span></div>
+    <div>🌍 Түвшин: <span id="level">1</span></div>
+  </div>
+
+  <div class="controls">
+    ⬅️ A/D эсвэл сум · SPACE үсрэх · P пауз
+  </div>
+
+  <div class="game-over" id="gameOverScreen">
+    <h1 id="gameOverTitle">Game Over</h1>
+    <p id="gameOverMsg">Амьд дуусав!</p>
+    <p>Оноо: <span id="finalScore">0</span></p>
+    <button onclick="location.reload()">Дахин эхлүүлэх</button>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// Game variables
+const game = {
+  score: 0,
+  lives: 3,
+  level: 1,
+  gameOver: false,
+  won: false,
+  paused: false,
+};
+
+// Player
+const player = {
+  x: 50,
+  y: 0,
+  width: 20,
+  height: 24,
+  vx: 0,
+  vy: 0,
+  jumping: false,
+  grounded: false,
+  speed: 4,
+  jumpPower: 12,
+};
+
+// Physics
+const gravity = 0.6;
+const groundLevel = 520;
+
+// Input
+const keys = {};
+window.addEventListener('keydown', (e) => {
+  keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') { e.preventDefault(); player.jump(); }
+  if (e.key.toLowerCase() === 'p') game.paused = !game.paused;
+});
+window.addEventListener('keyup', (e) => {
+  keys[e.key.toLowerCase()] = false;
+});
+
+player.jump = function() {
+  if (this.grounded && !game.paused) {
+    this.vy = -this.jumpPower;
+    this.grounded = false;
+  }
+};
+
+// Platforms
+let platforms = [];
+let enemies = [];
+let coins = [];
+let goal = {};
+
+function initLevel() {
+  platforms = [
+    { x: 0, y: 560, w: 800, h: 40, color: '#8B4513' }, // ground
+    { x: 100, y: 480, w: 200, h: 20, color: '#8B4513' },
+    { x: 400, y: 420, w: 200, h: 20, color: '#8B4513' },
+    { x: 100, y: 320, w: 150, h: 20, color: '#8B4513' },
+    { x: 550, y: 340, w: 150, h: 20, color: '#8B4513' },
+    { x: 300, y: 200, w: 200, h: 20, color: '#8B4513' },
+  ];
+
+  enemies = [];
+  for (let i = 0; i < 2 + game.level; i++) {
+    enemies.push({
+      x: 150 + i * 250,
+      y: 450,
+      w: 20,
+      h: 20,
+      vx: (2 + game.level * 0.5) * (i % 2 === 0 ? 1 : -1),
+      minX: 100 + i * 200,
+      maxX: 250 + i * 200,
+      color: '#ff4444'
+    });
+  }
+
+  coins = [];
+  for (let p of platforms) {
+    for (let i = 0; i < 3; i++) {
+      coins.push({
+        x: p.x + 20 + i * 50,
+        y: p.y - 30,
+        radius: 6,
+        collected: false,
+        color: '#FFD700'
+      });
+    }
+  }
+
+  goal = { x: 600, y: 480, w: 40, h: 40, color: '#FF1493' };
+
+  player.x = 50;
+  player.y = 0;
+  player.vx = 0;
+  player.vy = 0;
+}
+
+initLevel();
+
+function update() {
+  if (game.paused || game.gameOver || game.won) return;
+
+  // Player movement
+  player.vx = 0;
+  if (keys['a'] || keys['arrowleft']) player.vx = -player.speed;
+  if (keys['d'] || keys['arrowright']) player.vx = player.speed;
+
+  player.x += player.vx;
+  player.vy += gravity;
+  player.y += player.vy;
+
+  // Boundary
+  if (player.x < 0) player.x = 0;
+  if (player.x + player.width > 800) player.x = 800 - player.width;
+
+  // Collision with platforms
+  player.grounded = false;
+  for (let p of platforms) {
+    if (
+      player.x < p.x + p.w &&
+      player.x + player.width > p.x &&
+      player.y + player.height >= p.y &&
+      player.y + player.height <= p.y + p.h + 5 &&
+      player.vy >= 0
+    ) {
+      player.y = p.y - player.height;
+      player.vy = 0;
+      player.grounded = true;
+    }
+  }
+
+  // Fall off screen
+  if (player.y > 600) {
+    game.lives--;
+    if (game.lives <= 0) {
+      endGame();
+    } else {
+      player.x = 50;
+      player.y = 0;
+      player.vx = 0;
+      player.vy = 0;
+    }
+  }
+
+  // Enemy movement and collision
+  for (let e of enemies) {
+    e.x += e.vx;
+    if (e.x <= e.minX || e.x >= e.maxX) e.vx *= -1;
+
+    // Collision with player
+    if (
+      player.x < e.x + e.w &&
+      player.x + player.width > e.x &&
+      player.y < e.y + e.h &&
+      player.y + player.height > e.y
+    ) {
+      game.lives--;
+      if (game.lives <= 0) {
+        endGame();
+      } else {
+        player.x = 50;
+        player.y = 0;
+      }
+    }
+  }
+
+  // Coin collection
+  for (let c of coins) {
+    if (!c.collected) {
+      const dx = (player.x + player.width / 2) - c.x;
+      const dy = (player.y + player.height / 2) - c.y;
+      if (Math.hypot(dx, dy) < 20) {
+        c.collected = true;
+        game.score += 10;
+      }
+    }
+  }
+
+  // Goal collision (win)
+  if (
+    player.x < goal.x + goal.w &&
+    player.x + player.width > goal.x &&
+    player.y < goal.y + goal.h &&
+    player.y + player.height > goal.y
+  ) {
+    game.won = true;
+    game.level++;
+  }
+
+  // Update UI
+  document.getElementById('lives').textContent = game.lives;
+  document.getElementById('score').textContent = game.score;
+  document.getElementById('level').textContent = game.level;
+}
+
+function draw() {
+  // Clear
+  ctx.fillStyle = 'rgba(135, 206, 235, 0.5)';
+  ctx.fillRect(0, 0, 800, 600);
+
+  // Platforms
+  for (let p of platforms) {
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, p.w, p.h);
+    ctx.strokeStyle = '#654321';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(p.x, p.y, p.w, p.h);
+  }
+
+  // Coins
+  for (let c of coins) {
+    if (!c.collected) {
+      ctx.fillStyle = c.color;
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, c.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#DAA520';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // Goal (flag)
+  ctx.fillStyle = goal.color;
+  ctx.fillRect(goal.x, goal.y, goal.w, goal.h);
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'center';
+  ctx.fillText('🚩', goal.x + goal.w / 2, goal.y + goal.h / 2 + 5);
+
+  // Enemies
+  for (let e of enemies) {
+    ctx.fillStyle = e.color;
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+    ctx.fillStyle = '#000';
+    ctx.fillRect(e.x + 4, e.y + 4, 4, 4);
+    ctx.fillRect(e.x + 12, e.y + 4, 4, 4);
+  }
+
+  // Player (Mario)
+  ctx.fillStyle = '#FF0000';
+  ctx.fillRect(player.x + 2, player.y, player.width - 4, 16); // Body
+  ctx.fillStyle = '#FFDBAC';
+  ctx.fillRect(player.x + 4, player.y - 8, 12, 10); // Head
+  ctx.fillStyle = '#000';
+  ctx.fillRect(player.x + 6, player.y - 6, 3, 3); // Eye
+  ctx.fillStyle = '#8B0000';
+  ctx.fillRect(player.x + 2, player.y + 16, 6, 8); // Leg
+  ctx.fillRect(player.x + 12, player.y + 16, 6, 8);
+
+  // Paused text
+  if (game.paused) {
+    ctx.fillStyle = 'rgba(0,0,0,0.5)';
+    ctx.fillRect(0, 0, 800, 600);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 40px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('PAUSE', 400, 300);
+  }
+
+  // Won
+  if (game.won) {
+    ctx.fillStyle = 'rgba(0,0,0,0.7)';
+    ctx.fillRect(0, 0, 800, 600);
+    ctx.fillStyle = '#FFD700';
+    ctx.font = 'bold 50px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('🎉 ЯЛСАН! 🎉', 400, 250);
+    ctx.fillStyle = '#fff';
+    ctx.font = '20px Arial';
+    ctx.fillText(`Түвшин: ${game.level}`, 400, 300);
+    ctx.fillText('SPACE дараж дахин эхлүүлэх', 400, 350);
+    
+    if (keys[' ']) {
+      game.won = false;
+      initLevel();
+    }
+  }
+}
+
+function endGame() {
+  game.gameOver = true;
+  document.getElementById('gameOverScreen').style.display = 'block';
+  document.getElementById('gameOverTitle').textContent = '💀 Game Over';
+  document.getElementById('gameOverMsg').textContent = 'Амьд дуусав!';
+  document.getElementById('finalScore').textContent = game.score;
+}
+
+function gameLoop() {
+  update();
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+gameLoop();
+</script>
+
+</body>
+</html>
